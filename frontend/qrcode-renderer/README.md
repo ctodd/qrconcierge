@@ -35,7 +35,6 @@ qrcode-generator/
 │   └── index.css                # Styles
 ├── public/
 ├── cloudformation/
-│   ├── hosting-stack.yaml       # CloudFormation template for hosting
 │   └── deployment-stack.yaml    # CloudFormation template for deployment
 ├── index.html                   # HTML entry point
 ├── package.json                 # Dependencies and scripts
@@ -50,12 +49,19 @@ qrcode-generator/
    npm install
    ```
 
-2. Start the development server:
+2. Create a `.env` file based on `.env.example`:
+   ```
+   cp .env.example .env
+   ```
+   
+   Then update the `.env` file with your actual API URL.
+
+3. Start the development server:
    ```
    npm run dev
    ```
 
-3. Build for production:
+4. Build for production:
    ```
    npm run build
    ```

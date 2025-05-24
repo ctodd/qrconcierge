@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { TokenRequest, TokenResponse } from './types';
 
-const API_BASE_URL = 'https://lgnd27dxvc.execute-api.us-east-1.amazonaws.com/prod';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_KEY = import.meta.env.VITE_API_KEY;
 
 export const getToken = async (request: TokenRequest): Promise<TokenResponse> => {
   try {
@@ -16,6 +17,9 @@ export const getToken = async (request: TokenRequest): Promise<TokenResponse> =>
     
     const response = await axios.get<TokenResponse>(`${API_BASE_URL}/getToken`, {
       params,
+      headers: {
+        'x-api-key': API_KEY
+      }
     });
     
     return response.data;
