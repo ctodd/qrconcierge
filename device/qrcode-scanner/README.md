@@ -20,9 +20,9 @@ pip install -r requirements.txt
 3. Configure the environment variables by creating a `.env` file:
 
 ```
-API_BASE_URL=https://lgnd27dxvc.execute-api.us-east-1.amazonaws.com
-API_STAGE=prod
-API_RESOURCE=/validateToken
+API_BASE_URL=your_api_base_url_here
+API_STAGE=your_api_stage_here
+API_RESOURCE=your_api_resource_here
 API_KEY=your_api_key_here
 ```
 
@@ -73,9 +73,9 @@ python qr_scanner.py -v -d 5
 
 The application uses environment variables loaded from a `.env` file:
 
-- `API_BASE_URL`: The base URL of the API (default: https://lgnd27dxvc.execute-api.us-east-1.amazonaws.com)
-- `API_STAGE`: The API stage (default: prod)
-- `API_RESOURCE`: The API resource path (default: /validateToken)
+- `API_BASE_URL`: The base URL of the API
+- `API_STAGE`: The API stage
+- `API_RESOURCE`: The API resource path
 - `API_KEY`: Your API key for authentication
 
 ## Troubleshooting
