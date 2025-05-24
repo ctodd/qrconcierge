@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QR Code Generator</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+    }
+    .container {
+      margin-top: 30px;
+    }
+    .qr-placeholder {
+      width: 256px;
+      height: 256px;
+      margin: 20px auto;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #666;
+    }
+    input, button {
+      padding: 10px;
+      margin: 10px 0;
+      width: 100%;
+      max-width: 300px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <h1>QR Code Generator</h1>
+  <p>This is a placeholder for the QR Code Generator application.</p>
+  
+  <div class="container">
+    <input type="text" placeholder="Enter unique ID (e.g., phone number)" id="uniqueId">
+    <div>
+      <input type="text" placeholder="Latitude (optional)" id="latitude">
+      <input type="text" placeholder="Longitude (optional)" id="longitude">
+    </div>
+    <button id="generateBtn">Generate QR Code</button>
+    
+    <div class="qr-placeholder">
+      QR code will appear here
+    </div>
+    
+    <div id="countdown"></div>
+    <div id="error" style="color: red;"></div>
+  </div>
+  
+  <script>
+    document.getElementById('generateBtn').addEventListener('click', function() {
+      document.querySelector('.qr-placeholder').innerHTML = 
+        "API endpoint not available.<br>In a real implementation, this would show a QR code.";
+    });
+  </script>
+</body>
+</html>

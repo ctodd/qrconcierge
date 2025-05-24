@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Get API configuration from environment variables
-API_BASE_URL = os.getenv('API_BASE_URL', 'https://lgnd27dxvc.execute-api.us-east-1.amazonaws.com')
+API_BASE_URL = os.getenv('API_BASE_URL', '')
 API_STAGE = os.getenv('API_STAGE', 'prod')
 API_RESOURCE = os.getenv('API_RESOURCE', '/validateToken')
 API_KEY = os.getenv('API_KEY', '')

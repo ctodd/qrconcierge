@@ -1,0 +1,284 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for deploying QR Code Generator web application to a subdirectory'
+
+Parameters:
+  HostingStackName:
+    Type: String
+    Description: Name of the hosting stack that created the S3 bucket and CloudFront distribution
+    Default: qrcode-generator-hosting
+  
+  SubdirectoryPath:
+    Type: String
+    Description: Subdirectory path where the application will be deployed
+    Default: qrcode-generator
+  
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket containing the built application artifacts
+    Default: ''
+  
+  ArtifactKey:
+    Type: String
+    Description: S3 key for the built application artifacts (ZIP file)
+    Default: ''
+
+Resources:
+  # IAM role for the Lambda function
+  DeploymentLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${ArtifactBucket}/*'
+                  - !Sub 'arn:aws:s3:::${ArtifactBucket}'
+                  - Fn::ImportValue: !Sub '${HostingStackName}-WebsiteBucketName'
+                  - !Sub 'arn:aws:s3:::${Fn::ImportValue:${HostingStackName}-WebsiteBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Fn::ImportValue:${HostingStackName}-CloudFrontDistributionId}'
+
+  # Lambda function to deploy the application to the S3 bucket
+  DeploymentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt DeploymentLambdaRole.Arn
+      Runtime: nodejs18.x
+      Timeout: 300
+      MemorySize: 512
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3();
+          const cloudfront = new AWS.CloudFront();
+          const { promisify } = require('util');
+          const { pipeline } = require('stream');
+          const pipelineAsync = promisify(pipeline);
+          const unzipper = require('unzipper');
+          const mime = require('mime-types');
+          
+          exports.handler = async (event, context) => {
+            console.log('Deployment event:', JSON.stringify(event));
+            
+            const sourceBucket = event.ResourceProperties.ArtifactBucket;
+            const sourceKey = event.ResourceProperties.ArtifactKey;
+            const targetBucket = event.ResourceProperties.TargetBucket;
+            const subdirectory = event.ResourceProperties.Subdirectory;
+            const cloudfrontDistId = event.ResourceProperties.CloudFrontDistributionId;
+            
+            if (event.RequestType === 'Delete') {
+              console.log('Deleting files from subdirectory');
+              await deleteSubdirectoryContents(targetBucket, subdirectory);
+              await sendResponse(event, context, 'SUCCESS');
+              return;
+            }
+            
+            if (event.RequestType === 'Create' || event.RequestType === 'Update') {
+              try {
+                // Delete existing files in the subdirectory
+                await deleteSubdirectoryContents(targetBucket, subdirectory);
+                
+                // Download and extract the ZIP file
+                console.log(`Extracting ${sourceKey} from ${sourceBucket} to ${targetBucket}/${subdirectory}`);
+                const s3Stream = s3.getObject({ Bucket: sourceBucket, Key: sourceKey }).createReadStream();
+                
+                // Process the ZIP file and upload its contents
+                const directory = subdirectory.endsWith('/') ? subdirectory : `${subdirectory}/`;
+                const extractorStream = s3Stream.pipe(unzipper.Parse());
+                
+                extractorStream.on('entry', async (entry) => {
+                  const fileName = entry.path;
+                  const type = entry.type;
+                  
+                  if (type === 'File') {
+                    const contentType = mime.lookup(fileName) || 'application/octet-stream';
+                    const targetKey = `${directory}${fileName}`;
+                    
+                    console.log(`Uploading ${fileName} to ${targetBucket}/${targetKey}`);
+                    
+                    await s3.upload({
+                      Bucket: targetBucket,
+                      Key: targetKey,
+                      Body: entry,
+                      ContentType: contentType
+                    }).promise();
+                  } else {
+                    entry.autodrain();
+                  }
+                });
+                
+                await new Promise((resolve, reject) => {
+                  extractorStream.on('finish', resolve);
+                  extractorStream.on('error', reject);
+                });
+                
+                // Create CloudFront invalidation
+                console.log('Creating CloudFront invalidation');
+                await cloudfront.createInvalidation({
+                  DistributionId: cloudfrontDistId,
+                  InvalidationBatch: {
+                    CallerReference: `deployment-${Date.now()}`,
+                    Paths: {
+                      Quantity: 1,
+                      Items: [`/${directory}*`]
+                    }
+                  }
+                }).promise();
+                
+                await sendResponse(event, context, 'SUCCESS');
+              } catch (error) {
+                console.error('Deployment failed:', error);
+                await sendResponse(event, context, 'FAILED', error.message);
+              }
+            }
+          };
+          
+          async function deleteSubdirectoryContents(bucket, prefix) {
+            const directory = prefix.endsWith('/') ? prefix : `${prefix}/`;
+            
+            const listParams = {
+              Bucket: bucket,
+              Prefix: directory
+            };
+            
+            const listedObjects = await s3.listObjectsV2(listParams).promise();
+            
+            if (listedObjects.Contents.length === 0) return;
+            
+            const deleteParams = {
+              Bucket: bucket,
+              Delete: { Objects: [] }
+            };
+            
+            listedObjects.Contents.forEach(({ Key }) => {
+              deleteParams.Delete.Objects.push({ Key });
+            });
+            
+            await s3.deleteObjects(deleteParams).promise();
+            
+            if (listedObjects.IsTruncated) await deleteSubdirectoryContents(bucket, prefix);
+          }
+          
+          async function sendResponse(event, context, responseStatus, reason) {
+            const responseBody = JSON.stringify({
+              Status: responseStatus,
+              Reason: reason || 'See CloudWatch logs for details',
+              PhysicalResourceId: context.logStreamName,
+              StackId: event.StackId,
+              RequestId: event.RequestId,
+              LogicalResourceId: event.LogicalResourceId
+            });
+            
+            console.log('Sending response:', responseBody);
+            
+            const https = require('https');
+            const url = require('url');
+            const parsedUrl = url.parse(event.ResponseURL);
+            
+            const options = {
+              hostname: parsedUrl.hostname,
+              port: 443,
+              path: parsedUrl.path,
+              method: 'PUT',
+              headers: {
+                'Content-Type': '',
+                'Content-Length': responseBody.length
+              }
+            };
+            
+            return new Promise((resolve, reject) => {
+              const req = https.request(options, (res) => {
+                console.log(`Response status code: ${res.statusCode}`);
+                resolve();
+              });
+              
+              req.on('error', (error) => {
+                console.error('Error sending response:', error);
+                reject(error);
+              });
+              
+              req.write(responseBody);
+              req.end();
+            });
+          }
+      Environment:
+        Variables:
+          NODE_PATH: "/opt/nodejs/node_modules"
+
+  # Lambda layer for dependencies
+  DeploymentLambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - nodejs18.x
+      Content:
+        ZipFile: |
+          const fs = require('fs');
+          const path = require('path');
+          const { execSync } = require('child_process');
+          
+          // Create directories
+          fs.mkdirSync('/tmp/nodejs/node_modules', { recursive: true });
+          
+          // Create package.json
+          const packageJson = {
+            "dependencies": {
+              "unzipper": "^0.10.11",
+              "mime-types": "^2.1.35"
+            }
+          };
+          
+          fs.writeFileSync('/tmp/nodejs/package.json', JSON.stringify(packageJson));
+          
+          // Install dependencies
+          execSync('npm install', { cwd: '/tmp/nodejs' });
+          
+          // Create the layer structure
+          fs.mkdirSync('/tmp/layer/nodejs', { recursive: true });
+          execSync('cp -r /tmp/nodejs/node_modules /tmp/layer/nodejs/');
+          
+          // Create the zip file
+          execSync('cd /tmp/layer && zip -r /tmp/layer.zip .');
+          
+          // Return the zip file content
+          return fs.readFileSync('/tmp/layer.zip');
+      Description: Layer with dependencies for the deployment Lambda function
+      LayerName: !Sub ${AWS::StackName}-deployment-dependencies
+
+  # Custom resource to trigger the deployment
+  DeploymentResource:
+    Type: Custom::Deployment
+    Properties:
+      ServiceToken: !GetAtt DeploymentLambda.Arn
+      ArtifactBucket: !Ref ArtifactBucket
+      ArtifactKey: !Ref ArtifactKey
+      TargetBucket: 
+        Fn::ImportValue: !Sub '${HostingStackName}-WebsiteBucketName'
+      Subdirectory: !Ref SubdirectoryPath
+      CloudFrontDistributionId:
+        Fn::ImportValue: !Sub '${HostingStackName}-CloudFrontDistributionId'
+
+Outputs:
+  ApplicationURL:
+    Description: URL to access the deployed application
+    Value: !Sub 'https://${Fn::ImportValue:${HostingStackName}-CloudFrontDomainName}/${SubdirectoryPath}/'
